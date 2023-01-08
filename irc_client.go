@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 )
 
 type ConnectState int8
@@ -15,14 +16,19 @@ const (
 	Connected
 )
 
+type BanchoClientOptions struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+}
+
 type BanchoClient struct {
-	Host         string
-	Port         string
-	Username     string
-	Password     string
-	connectState ConnectState
-	reconnectTimeout
-	client *net.Conn
+	options          BanchoClientOptions
+	client           *net.Conn
+	mu               sync.RWMutex
+	connectState     ConnectState
+	reconnectTimeout int
 }
 
 func (b *BanchoClient) send(message string) error {
@@ -38,31 +44,35 @@ func (b *BanchoClient) send(message string) error {
 }
 
 func (b *BanchoClient) setConnectState(state ConnectState) {
+	b.mu.Lock()
 	b.connectState = state
+	b.mu.Unlock()
 }
 
 func (b *BanchoClient) GetConnectState() ConnectState {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.connectState
 }
 
 func (b *BanchoClient) IsConnected() bool {
-	return b.connectState == Connected
+	return b.GetConnectState() == Connected
 }
 
 func (b *BanchoClient) IsConnecting() bool {
-	return b.connectState == Connecting
+	return b.GetConnectState() == Connecting
 }
 
 func (b *BanchoClient) IsDisconnected() bool {
-	return b.connectState == Disconnected
+	return b.GetConnectState() == Disconnected
 }
 
 func (b *BanchoClient) IsReconnecting() bool {
-	return b.connectState == Reconnecting
+	return b.GetConnectState() == Reconnecting
 }
 
 func (b *BanchoClient) Connect() error {
-	conn, err := net.Dial("tcp", b.Host+":"+b.Port)
+	conn, err := net.Dial("tcp", b.options.Host+":"+b.options.Port)
 	if err != nil {
 		return err
 	}
@@ -70,8 +80,8 @@ func (b *BanchoClient) Connect() error {
 		return errors.New("you should provide credentials, dumb dumb")
 	}
 
-	b.send("USER " + b.Username)
-	b.send("PASS " + b.Password)
+	b.send("USER " + b.options.Username)
+	b.send("PASS " + b.options.Password)
 
 	b.client = &conn
 
@@ -93,6 +103,7 @@ func (b *BanchoClient) Disconnect() error {
 }
 
 func NewBanchoClient(username, password string) *BanchoClient {
+
 	return &BanchoClient{
 		Host:     "irc.ppy.sh",
 		Port:     "6667",
