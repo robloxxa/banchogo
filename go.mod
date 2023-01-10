@@ -1,3 +1,3 @@
-module gosulogger
+module bancho.go
 
 go 1.19
