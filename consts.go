@@ -1,15 +1,19 @@
 package main
 
-type ConnectState int8
+type ConnectState uint8
+
+const (
+	BANCHOHOST = "irc.ppy.sh"
+	BANCHOPORT = "6667"
+)
 
 const (
 	Disconnected ConnectState = iota
-	Connecting
 	Reconnecting
+	Connecting
 	Connected
 )
 
-// https://bancho.js.org/lib_BanchoClient.js.html
 var IgnoredCodes = []string{
 	"312",
 	"333",
