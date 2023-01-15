@@ -10,13 +10,6 @@ import (
 	"time"
 )
 
-type BanchoMessageType int8
-
-const (
-	PM BanchoMessageType = iota
-	CM
-)
-
 type BanchoUser struct {
 	Username string
 	// TODO
@@ -25,17 +18,13 @@ type BanchoUser struct {
 
 type BanchoChannel struct {
 	Id      string
-	Members map[string]*BanchoChannelMember
+	Members map[string]BanchoChannelMember
 }
 
-type BanchoPMMessage struct {
-	// TODO
-	User    BanchoUser
-	Channel BanchoChannel
-	Type    BanchoMessageType
-	Message string
-
-	Raw string
+type BanchoChannelMember struct {
+	Channel *BanchoChannel
+	User    *BanchoUser
+	Mode    BanchoChannelMemberMode
 }
 
 type BanchoClient struct {
@@ -62,11 +51,10 @@ type BanchoClient struct {
 
 	eventMutex    sync.RWMutex
 	callbackID    CallbackID
-	callbackPairs []CallbackPair
+	callbackPairs map[string][]CallbackID
 	callbacks     map[CallbackID]interface{}
 
-	welcomeChan chan bool
-	done        chan bool
+	done chan bool
 }
 
 func NewBanchoClient(username, password string) *BanchoClient {
@@ -83,7 +71,6 @@ func (b *BanchoClient) Connect() error {
 
 	b.conn = nil
 	b.done = nil
-	b.welcomeChan = nil
 
 	{
 		if b.Host == "" {
@@ -108,7 +95,6 @@ func (b *BanchoClient) Connect() error {
 	}
 
 	b.conn = &conn
-	b.welcomeChan = make(chan bool, 1)
 	b.done = make(chan bool)
 
 	go b.handleIrcMessages()
@@ -123,8 +109,6 @@ func (b *BanchoClient) Connect() error {
 	b.setConnectState(Connecting)
 	for {
 		select {
-		case <-b.welcomeChan: // TODO: понять где менять стейт на коннектед
-			b.setConnectState(Connected)
 		case <-b.done:
 			return nil
 		}
@@ -166,7 +150,7 @@ func (b *BanchoClient) handleIrcMessages() {
 	for {
 		select {
 		case message := <-msgChan:
-			//TODO: Написать парсер сообщения
+			b.emitEvent("onRawMessage", message)
 			fmt.Println(message)
 		case <-b.done:
 			return

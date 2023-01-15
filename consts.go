@@ -2,6 +2,8 @@ package main
 
 type ConnectState uint8
 
+type BanchoChannelMemberMode string
+
 const (
 	BANCHOHOST = "irc.ppy.sh"
 	BANCHOPORT = "6667"
@@ -12,6 +14,11 @@ const (
 	Reconnecting
 	Connecting
 	Connected
+)
+
+const (
+	IRCUser      BanchoChannelMemberMode = "v"
+	IRCModerator                         = "o"
 )
 
 var IgnoredCodes = []string{
