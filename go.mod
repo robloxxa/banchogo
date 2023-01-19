@@ -1,3 +1,3 @@
-module bancho.go
+module ircbanchogo
 
 go 1.19
