@@ -1,31 +1,112 @@
-package main
+package banchogo
 
 import (
+	"errors"
 	"reflect"
+	"sync"
 )
+
+type EventName string
 
 type CallbackID int
 
-func (b *BanchoClient) addEvent(eventName string, callback interface{}) CallbackID {
-	if reflect.TypeOf(callback).Kind() != reflect.Func {
-		panic("callback is not a function!")
-	}
-	b.eventMutex.Lock()
-	defer b.eventMutex.Unlock()
-	_, ok := b.callbackPairs[eventName]
-	if !ok {
-		b.callbackPairs[eventName] = make([]CallbackID, 0)
-	}
-	b.callbacks[b.callbackID] = callback
-	b.callbackPairs[eventName] = append(b.callbackPairs[eventName], b.callbackID)
-	b.callbackID++
-	return b.callbackID
+type Event struct {
+	Name   string
+	Values []interface{}
 }
 
-//func (b *BanchoClient) removeEventListenerById(callbackId CallbackID) {
-//	b.eventMutex.Lock()
-//	defer b.eventMutex.Unlock()
-//	for _, pairs := range b.callbackPairs {
+type EventEmitter struct {
+	EventChan chan Event
+
+	mu            sync.RWMutex
+	CallbackID    CallbackID
+	CallbackPairs map[string][]CallbackID
+	callbacks     map[CallbackID]interface{}
+
+	End chan bool
+}
+
+func (e *EventEmitter) Listen() {
+	e.EventChan = make(chan Event)
+	e.End = make(chan bool)
+	go e.handleEvents()
+}
+
+func (e *EventEmitter) handleEvents() {
+	for {
+		select {
+		case event := <-e.EventChan:
+			e.mu.RLock()
+
+			pairs, ok := e.CallbackPairs[event.Name]
+			if !ok {
+				e.mu.RUnlock()
+				break
+			}
+
+			var arguments []reflect.Value
+
+			if len(event.Values) > 0 {
+				for _, v := range event.Values {
+					arguments = append(arguments, reflect.ValueOf(v))
+				}
+			}
+
+			for _, v := range pairs {
+				callback := reflect.ValueOf(e.callbacks[v])
+				// TODO: Make callbacks work with variadic functions (e.g. func(smh, ...something))
+				if callback.Type().NumIn() != len(arguments) {
+					continue
+				}
+				callback.Call(arguments)
+			}
+			e.mu.RUnlock()
+		case <-e.End:
+			return
+		}
+	}
+}
+
+func (e *EventEmitter) Close() {
+	close(e.End)
+	e.EventChan = nil
+}
+
+func (e *EventEmitter) on(eventName string, callback interface{}) CallbackID {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.CallbackPairs == nil {
+		e.CallbackPairs = make(map[string][]CallbackID)
+	}
+	if e.callbacks == nil {
+		e.callbacks = make(map[CallbackID]interface{})
+	}
+
+	_, ok := e.CallbackPairs[eventName]
+	if !ok {
+		e.CallbackPairs[eventName] = make([]CallbackID, 0)
+	}
+
+	e.callbacks[e.CallbackID] = callback
+	e.CallbackPairs[eventName] = append(e.CallbackPairs[eventName], e.CallbackID)
+	e.CallbackID++
+
+	return e.CallbackID
+}
+
+func (e *EventEmitter) On(eventName string, callback interface{}) (CallbackID, error) {
+	if reflect.TypeOf(callback).Kind() != reflect.Func {
+		return -1, errors.New("callback isn't a function")
+	}
+
+	return e.on(eventName, callback), nil
+}
+
+//func (e *EventEmitter) removeEventListenerById(callbackId CallbackID) {
+//	e.mu.Lock()
+//	defer e.mu.Unlock()
+//	for _, pairs := range e.CallbackPairs {
 //		for _, id := range pairs {
 //			if callbackId == id {
 //
@@ -34,35 +115,17 @@ func (b *BanchoClient) addEvent(eventName string, callback interface{}) Callback
 //	}
 //}
 
-func (b *BanchoClient) removeAllEventListeners() {
-	b.eventMutex.Lock()
-	b.callbackPairs = make(map[string][]CallbackID)
-	b.callbacks = make(map[CallbackID]interface{})
-	b.eventMutex.Unlock()
+func (e *EventEmitter) removeAllEventListeners() {
+	e.mu.Lock()
+	e.CallbackPairs = make(map[string][]CallbackID)
+	e.callbacks = make(map[CallbackID]interface{})
+	e.CallbackID = 0
+	e.mu.Unlock()
 }
 
-func (b *BanchoClient) emitEvent(eventName string, values ...interface{}) {
-	cbPairs, ok := b.callbackPairs[eventName]
-	if !ok {
+func (e *EventEmitter) Emit(eventName string, values ...interface{}) {
+	if e.EventChan == nil {
 		return
 	}
-
-	var arguments []reflect.Value
-
-	if len(values) > 0 {
-		for _, v := range values {
-			arguments = append(arguments, reflect.ValueOf(v))
-		}
-	}
-
-	b.eventMutex.RLock()
-	defer b.eventMutex.RUnlock()
-
-	for _, v := range cbPairs {
-		callback := reflect.ValueOf(b.callbacks[v])
-		if callback.Type().NumIn() != len(arguments) {
-			continue
-		}
-		go callback.Call(arguments)
-	}
+	e.EventChan <- Event{eventName, values}
 }
