@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 var ignoredCodes = []string{
 	"312",
@@ -15,5 +15,6 @@ var ircHandlers = map[string]func(*BanchoClient, []string){
 
 func handleWelcomeCommand(b *BanchoClient, splits []string) {
 	b.setConnectState(Connected)
-	//b.emitEvent("connect")
+	b.Event.Emit("connect")
+	b.welcomeChan <- true
 }

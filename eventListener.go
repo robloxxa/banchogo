@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 import (
 	"errors"
@@ -29,7 +29,7 @@ type EventEmitter struct {
 func (e *EventEmitter) Listen() {
 	e.EventChan = make(chan Event)
 	e.End = make(chan bool)
-	go e.handleEvents()
+	e.handleEvents()
 }
 
 func (e *EventEmitter) handleEvents() {

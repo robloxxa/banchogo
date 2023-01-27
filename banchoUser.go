@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 type BanchoUser struct {
 	Username string

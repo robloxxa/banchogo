@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 type Message interface {
 	// TODO: Not sure if I am even need this interface, but I will keep it for now

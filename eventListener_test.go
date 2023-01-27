@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 import (
 	"sync"

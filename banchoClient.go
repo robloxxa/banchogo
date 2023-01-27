@@ -1,4 +1,4 @@
-package banchogo
+package ircbanchogo
 
 import (
 	"bufio"
@@ -41,6 +41,8 @@ type BanchoClient struct {
 	Host     string
 	Port     string
 
+	Reconnect bool
+
 	Timeout          time.Duration
 	ReconnectTimeout time.Duration
 	KeepAlive        time.Duration
@@ -48,12 +50,14 @@ type BanchoClient struct {
 	Users    map[string]BanchoUser
 	Channels map[string]BanchoChannel
 
-	Event *EventEmitter
+	Event EventEmitter
 
 	conn net.Conn
 
 	stateMutex   sync.RWMutex
 	connectState ConnectState
+
+	reconnectSignal chan struct{}
 
 	welcomeChan chan bool
 	done        chan struct{}
@@ -88,7 +92,12 @@ func (b *BanchoClient) Connect() (err error) {
 		if b.ReconnectTimeout == 0 {
 			b.ReconnectTimeout = 5 * time.Minute
 		}
-
+		if b.KeepAlive == 0 {
+			b.KeepAlive = 0 //TODO:
+		}
+		if b.reconnectSignal == nil {
+			b.reconnectSignal = make(chan struct{}, 1)
+		}
 	}
 
 	conn, err := net.Dial("tcp", b.Host+":"+b.Port)
@@ -101,24 +110,22 @@ func (b *BanchoClient) Connect() (err error) {
 	b.welcomeChan = make(chan bool, 1)
 
 	go b.handleIrcMessages()
-
-	b.Event.Listen()
+	go b.Event.Listen()
 
 	defer func() {
 		if err != nil {
-			close(b.done)
+			b.close()
 			b.setConnectState(Disconnected)
-			b.Event.Emit("error", err)
+			b.Event.Close()
 		}
 	}()
+
+	b.setConnectState(Connecting)
 
 	b.Send("PASS " + b.Password)
 	b.Send("USER " + b.Username + " 0 * :" + b.Username)
 	b.Send("NICK " + b.Username)
 
-	b.setConnectState(Connecting)
-
-	// TODO: Make a Done or Loop function that will handle exit and reconnect
 	timeout := time.NewTimer(b.Timeout)
 	select {
 	case <-b.welcomeChan:
@@ -144,20 +151,39 @@ func (b *BanchoClient) Loop() {
 	}()
 	for {
 		<-b.done
-		if b.IsQuiting() {
+		if b.IsQuiting() || !b.Reconnect {
 			return
 		}
 
+		// TODO: Implement the reconnect mechanism
+		b.setConnectState(Reconnecting)
+
+		select {
+		case _, ok := <-b.reconnectSignal:
+
+			// Check if (*BanchoClient).Disconnect() was fired
+			if !ok {
+				return
+			}
+		}
 	}
 }
 
 func (b *BanchoClient) Disconnect() {
-
+	if b.IsDisconnected() || b.IsQuiting() {
+		return
+	}
+	b.setConnectState(Quiting)
+	b.close()
+	if b.reconnectSignal != nil {
+		close(b.reconnectSignal)
+		b.reconnectSignal = nil
+	}
 }
 
 func (b *BanchoClient) Send(message string) {
 	if b.IsDisconnected() || b.IsReconnecting() {
-		b.Event.Emit("error", errors.New("sending message while disconnected or reconnecting"))
+		b.Event.Emit("error", errors.New("trying to send a message while disconnected or reconnecting"))
 		return
 	}
 	_, err := fmt.Fprintf(b.conn, "%s\r\n", message)
@@ -190,8 +216,7 @@ func (b *BanchoClient) handleIrcMessages() {
 				ircHandler(b, splits)
 			}
 		case err := <-errChan:
-			b.Event.Emit("error", err) // TODO: not sure if i emit it here
-			b.close()
+			b.Event.Emit("error", err)
 			return
 		case <-b.done:
 			return
@@ -228,7 +253,7 @@ func (b *BanchoClient) getConnectState() ConnectState {
 
 func (b *BanchoClient) setConnectState(state ConnectState) {
 	b.stateMutex.Lock()
-	b.Event.Emit("changeState", state)
+	b.Event.Emit("stateChanged", state)
 	b.connectState = state
 	b.stateMutex.Unlock()
 }
