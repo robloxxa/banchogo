@@ -1,4 +1,4 @@
-package ircbanchogo
+package banchogo
 
 type BanchoChannelMemberMode string
 
