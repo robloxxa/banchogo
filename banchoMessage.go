@@ -1,31 +1,24 @@
-package ircbanchogo
+package banchogo
 
-type Message interface {
-	// TODO: Not sure if I am even need this interface, but I will keep it for now
+type BanchoMessage interface {
+	Sender() MessageSender
 	Content() string
 	Action() string
 }
 
-type BanchoMessage struct {
-	User    BanchoUser
+type banchoMessage struct {
+	Bancho *BanchoClient
+
+	User    *BanchoUser
+	Self    bool
 	Message string
 }
 
-func (b *BanchoMessage) Content() string {
+func (b *banchoMessage) Content() string {
 	return b.Message
 }
 
-func (b *BanchoMessage) Action() string {
+func (b *banchoMessage) Action() string {
 	// TODO:
 	return ""
-}
-
-type PrivateMessage struct {
-	BanchoMessage
-	Self bool
-}
-
-type ChannelMessage struct {
-	BanchoMessage
-	Channel BanchoChannel
 }
