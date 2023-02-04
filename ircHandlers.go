@@ -11,7 +11,7 @@ var ignoredCodes = []string{
 	"376",
 }
 
-var ircHandlers = map[string]func(*BanchoClient, []string){
+var ircHandlers = map[string]func(*Client, []string){
 	"001":     handleWelcomeCommand,
 	"353":     handleJoinCommand,
 	"464":     handleBadAuthCommand,
@@ -20,44 +20,44 @@ var ircHandlers = map[string]func(*BanchoClient, []string){
 	"QUIT":    handleQuitCommand,
 }
 
-func handleWelcomeCommand(b *BanchoClient, splits []string) {
+func handleWelcomeCommand(b *Client, splits []string) {
 	b.setConnectState(Connected)
 	b.connectSignal <- nil
 }
 
-func handleBadAuthCommand(b *BanchoClient, splits []string) {
+func handleBadAuthCommand(b *Client, splits []string) {
 	b.connectSignal <- ErrBadAuthentication
 }
 
-func handlePrivmsgCommand(b *BanchoClient, splits []string) {
+func handlePrivmsgCommand(b *Client, splits []string) {
 	username := b.GetUser(splits[0][1:strings.Index(splits[0], "!")])
-	message := strings.Join(splits[3:], " ")[1:]
+	content := strings.Join(splits[3:], " ")[1:]
 
 	if strings.ToLower(splits[2]) == strings.ToLower(b.Username) {
-		pm := newPrivateMessage(b, username, b.GetSelf(), false, message)
-		b.handle("PrivateMessage", pm)
-		b.handle("Message", BanchoMessage(pm))
+		pm := newPrivateMessage(b, username, b.GetSelf(), false, content)
+		b.ev.Handle("PrivateMessage", pm)
+		b.ev.Handle("Message", Message(pm))
 	} else if strings.Index(splits[2], "#") == -1 {
-		b.handle("RejectedMessage", newPrivateMessage(b, username, b.GetSelf(), true, message))
+		b.ev.Handle("RejectedMessage", newPrivateMessage(b, username, b.GetSelf(), true, content))
 	} else {
 		channel, _ := b.GetChannel(splits[2])
-		cm := newChannelMessage(b, username, channel, true, message)
-		b.handle("ChannelMessage", cm)
-		b.handle("Message", BanchoMessage(cm))
+		cm := newChannelMessage(b, username, channel, true, content)
+		b.ev.Handle("ChannelMessage", cm)
+		b.ev.Handle("Message", Message(cm))
 	}
 }
 
-func handleJoinCommand(b *BanchoClient, splits []string) {
+func handleJoinCommand(b *Client, splits []string) {
 
 }
 
-func handleQuitCommand(b *BanchoClient, splits []string) {
+func handleQuitCommand(b *Client, splits []string) {
 	username := splits[0][1:strings.Index(splits[0], "!")]
 	user := b.GetUser(username)
 
-	b.handle("QUIT", user) // TODO: make event type for QUIT
+	b.ev.Handle("QUIT", user) // TODO: make event type for QUIT
 
-	b.Channels.Range(func(k string, v *BanchoChannel) bool {
+	b.Channels.Range(func(_ string, v *Channel) bool {
 		v.Members.Delete(user.IrcUsername)
 		return true
 	})
