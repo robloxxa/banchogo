@@ -14,10 +14,10 @@ type whereResponse struct {
 	Error   error
 }
 
-type BanchoUser struct {
-	EventEmitter
+type User struct {
+	ev EventEmitter
 
-	client *BanchoClient
+	client *Client
 
 	whereChan       chan whereResponse
 	runningHandlers *[1]func()
@@ -33,32 +33,32 @@ type BanchoUser struct {
 	//Count50  int
 }
 
-func newBanchoUser(client *BanchoClient, username string) *BanchoUser {
-	return &BanchoUser{
+func newBanchoUser(client *Client, username string) *User {
+	return &User{
 		client:      client,
 		IrcUsername: username,
 	}
 }
 
-func (u *BanchoUser) Name() string {
+func (u *User) Name() string {
 	return u.IrcUsername
 }
 
-func (u *BanchoUser) SendMessage(message string) <-chan error {
+func (u *User) SendMessage(message string) <-chan error {
 	return newOutgoingBanchoMessage(u.client, u, message).Send()
 }
 
-func (u *BanchoUser) SendAction(message string) <-chan error {
+func (u *User) SendAction(message string) <-chan error {
 	return newOutgoingBanchoMessage(u.client, u, "ACTION "+message).Send()
 }
 
-func (u *BanchoUser) on(name string, handler interface{}, once bool) func() {
+func (u *User) on(name string, handler interface{}, once bool) func() {
 	if u.runningHandlers == nil {
 		pmHandler := u.client.HandlePrivateMessage(func(m *PrivateMessage) {
 			if m.User != u {
 				return
 			}
-			u.handle("Message", m)
+			u.ev.Handle("Message", m)
 		})
 
 		u.runningHandlers = &[1]func(){pmHandler}
@@ -72,25 +72,25 @@ func (u *BanchoUser) on(name string, handler interface{}, once bool) func() {
 		//})
 	}
 	if once {
-		return u.AddHandlerOnce(name, handler)
+		return u.ev.AddHandlerOnce(name, handler)
 	} else {
-		return u.AddHandler(name, handler)
+		return u.ev.AddHandler(name, handler)
 	}
 }
 
-func (u *BanchoUser) HandleMessage(handler func(*PrivateMessage)) func() {
+func (u *User) HandleMessage(handler func(*PrivateMessage)) func() {
 	return u.on("Message", handler, false)
 }
 
-func (u *BanchoUser) HandleMessageOnce(handler func(*PrivateMessage)) func() {
+func (u *User) HandleMessageOnce(handler func(*PrivateMessage)) func() {
 	return u.on("Message", handler, true)
 }
 
-func (u *BanchoUser) IsClient() bool {
+func (u *User) IsClient() bool {
 	return strings.ToLower(u.client.Username) == strings.ToLower(u.IrcUsername)
 }
 
-func (u *BanchoUser) Where() <-chan whereResponse {
+func (u *User) Where() <-chan whereResponse {
 	if u.whereChan == nil {
 		var clearEvent func()
 		u.whereChan = make(chan whereResponse, 1)

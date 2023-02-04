@@ -1,14 +1,14 @@
 package banchogo
 
 type ChannelMessage struct {
-	banchoMessage
+	message
 
-	Channel *BanchoChannel
+	Channel *Channel
 }
 
-func newChannelMessage(b *BanchoClient, user *BanchoUser, channel *BanchoChannel, self bool, content string) *ChannelMessage {
+func newChannelMessage(b *Client, user *User, channel *Channel, self bool, content string) *ChannelMessage {
 	return &ChannelMessage{
-		banchoMessage{b, user, self, content},
+		message{b, user, self, content},
 		channel,
 	}
 }

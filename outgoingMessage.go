@@ -1,16 +1,16 @@
 package banchogo
 
-type OutgoingBanchoMessage struct {
+type OutgoingMessage struct {
 	MessageSender
 
-	client *BanchoClient
+	client *Client
 
 	Content string
 	C       chan error
 }
 
-func newOutgoingBanchoMessage(client *BanchoClient, sender MessageSender, message string) *OutgoingBanchoMessage {
-	return &OutgoingBanchoMessage{
+func newOutgoingBanchoMessage(client *Client, sender MessageSender, message string) *OutgoingMessage {
+	return &OutgoingMessage{
 		sender,
 		client,
 		message,
@@ -18,7 +18,7 @@ func newOutgoingBanchoMessage(client *BanchoClient, sender MessageSender, messag
 	}
 }
 
-func (o *OutgoingBanchoMessage) Send() <-chan error {
+func (o *OutgoingMessage) Send() <-chan error {
 	o.C = make(chan error, 1)
 	if o.client.IsConnected() {
 		o.client.messageQueue <- o

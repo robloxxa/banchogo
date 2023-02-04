@@ -1,14 +1,14 @@
 package banchogo
 
 type PrivateMessage struct {
-	banchoMessage
+	message
 
-	Recipient *BanchoUser
+	Recipient *User
 }
 
-func newPrivateMessage(b *BanchoClient, user *BanchoUser, recipient *BanchoUser, self bool, content string) *PrivateMessage {
+func newPrivateMessage(b *Client, user *User, recipient *User, self bool, content string) *PrivateMessage {
 	return &PrivateMessage{
-		banchoMessage{b, user, self, content},
+		message{b, user, self, content},
 		recipient,
 	}
 }
