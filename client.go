@@ -188,6 +188,8 @@ func (b *Client) stop() {
 		b.done = nil
 	}
 
+	b.wg.Wait()
+
 	if b.reconnectSignal != nil {
 		close(b.reconnectSignal)
 		b.reconnectSignal = nil
@@ -197,8 +199,6 @@ func (b *Client) stop() {
 		b.conn.Close()
 		b.conn = nil
 	}
-
-	b.wg.Wait()
 
 	b.Channels.Range(func(k string, u *Channel) bool {
 		u.Joined = false
@@ -284,6 +284,7 @@ func (b *Client) Send(message string) error {
 }
 
 func (b *Client) readIrcMessages(conn net.Conn, done <-chan struct{}) {
+	defer b.wg.Done()
 	tp := textproto.NewReader(bufio.NewReader(conn))
 	for {
 		content, err := tp.ReadLine()
@@ -328,6 +329,7 @@ func (b *Client) processMessages(messageQueue <-chan *OutgoingMessage) {
 			msg.C <- ErrConnectionClosed
 		}
 		b.messageQueue = nil
+		b.wg.Done()
 	}()
 	for {
 		select {

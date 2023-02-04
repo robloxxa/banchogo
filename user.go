@@ -15,7 +15,7 @@ type whereResponse struct {
 }
 
 type User struct {
-	ev EventEmitter
+	ev *EventEmitter
 
 	client *Client
 
@@ -35,6 +35,7 @@ type User struct {
 
 func newBanchoUser(client *Client, username string) *User {
 	return &User{
+		ev:          NewEmitter(),
 		client:      client,
 		IrcUsername: username,
 	}
