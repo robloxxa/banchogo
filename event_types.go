@@ -10,7 +10,7 @@ type WithErrorHandlerType func(error)
 
 type RawMessageHandlerType func([]string)
 
-type MessageHandlerType func(BanchoMessage)
+type MessageHandlerType func(Message)
 
 type PrivateMessageHandlerType func(*PrivateMessage)
 

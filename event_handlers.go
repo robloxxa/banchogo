@@ -23,7 +23,7 @@ func (eh EmptyHandlerType) NumField() int {
 }
 
 func (eh MessageHandlerType) Call(a ...interface{}) {
-	eh(a[0].(BanchoMessage))
+	eh(a[0].(Message))
 }
 
 func (eh MessageHandlerType) NumField() int {
@@ -60,7 +60,7 @@ func interfaceToEventHandler(handler interface{}) EventHandler {
 		return ChannelMessageHandlerType(eh)
 	case func():
 		return EmptyHandlerType(eh)
-	case func(BanchoMessage):
+	case func(Message):
 		return MessageHandlerType(eh)
 	case func(*PrivateMessage):
 		return PrivateMessageHandlerType(eh)
