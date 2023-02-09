@@ -1,4 +1,4 @@
-module banchogo
+module github.com/robloxxa/banchogo
 
 go 1.19
 
