@@ -1,21 +1,13 @@
 package banchogo
 
 import (
-	"github.com/puzpuzpuz/xsync/v2"
 	"strings"
+	"sync"
 )
 
-type event struct {
-	Name string
-	Args []interface{}
-}
-
 type EventEmitter struct {
-	handlers     *xsync.MapOf[string, []*EventHandlerInstance]
-	handlersOnce *xsync.MapOf[string, []*EventHandlerInstance]
-
-	eventQueue chan event
-	done       chan struct{}
+	handlersMu sync.Mutex
+	handlers   map[string][]*EventHandlerInstance
 }
 
 type EventHandler interface {
@@ -24,107 +16,70 @@ type EventHandler interface {
 }
 
 type EventHandlerInstance struct {
+	once         *sync.Once
 	eventHandler EventHandler
 }
 
-func NewEmitter() *EventEmitter {
-	return &EventEmitter{
-		handlers:     xsync.NewMapOf[[]*EventHandlerInstance](),
-		handlersOnce: xsync.NewMapOf[[]*EventHandlerInstance](),
-	}
-}
+func (e *EventEmitter) on(name string, once bool, eh EventHandler) func() {
+	e.handlersMu.Lock()
+	defer e.handlersMu.Unlock()
 
-func (e *EventEmitter) addHandler(name string, eh EventHandler) func() {
 	if e.handlers == nil {
-		e.handlers = xsync.NewMapOf[[]*EventHandlerInstance]()
+		e.handlers = map[string][]*EventHandlerInstance{}
 	}
 
-	ehi := &EventHandlerInstance{eh}
-	_, ok := e.handlers.Compute(name, func(oldValue []*EventHandlerInstance, loaded bool) (newValue []*EventHandlerInstance, delete bool) {
-		newValue = append(oldValue, ehi)
-		delete = false
-		return
-	})
-
-	if !ok {
-		panic("sync map failed to store a value in handlers")
+	ehi := &EventHandlerInstance{eventHandler: eh}
+	if once {
+		ehi.once = &sync.Once{}
 	}
+
+	e.handlers[name] = append(e.handlers[name], ehi)
 
 	return func() {
-		e.removeEventHandlerInstance(name, ehi)
+		e.off(name, ehi)
 	}
 }
 
-func (e *EventEmitter) addHandlerOnce(name string, eh EventHandler) func() {
-	//if e.handlersOnce == nil {
-	//	e.handlersOnce =
-	//}
+func (e *EventEmitter) off(name string, ehi *EventHandlerInstance) {
+	e.handlersMu.Lock()
+	defer e.handlersMu.Unlock()
 
-	ehi := &EventHandlerInstance{eh}
-
-	_, ok := e.handlersOnce.Compute(name, func(oldValue []*EventHandlerInstance, loaded bool) (newValue []*EventHandlerInstance, delete bool) {
-		newValue = append(oldValue, ehi)
-		delete = false
-		return
-	})
-
-	if !ok {
-		panic("sync map failed to store a value in handlers")
-	}
-
-	return func() {
-		e.removeEventHandlerInstance(name, ehi)
-	}
-}
-
-func (e *EventEmitter) removeEventHandlerInstance(name string, ehi *EventHandlerInstance) {
-	e.handlers.Compute(name, func(oldValue []*EventHandlerInstance, loaded bool) (newValue []*EventHandlerInstance, delete bool) {
-		for i := range oldValue {
-			if oldValue[i] == ehi {
-				newValue = append(oldValue[:i], oldValue[i+1:]...)
-				return
-			}
+	handlers := e.handlers[name]
+	for i := range handlers {
+		if handlers[i] == ehi {
+			e.handlers[name] = append(handlers[:i], handlers[i+1:]...)
 		}
-		return
-	})
-
-	e.handlersOnce.Compute(name, func(oldValue []*EventHandlerInstance, loaded bool) (newValue []*EventHandlerInstance, delete bool) {
-		for i := range oldValue {
-			if oldValue[i] == ehi {
-				newValue = append(oldValue[:i], oldValue[i+1:]...)
-				return
-			}
-		}
-		return
-	})
+	}
 }
 
-func (e *EventEmitter) handle(name string, params ...interface{}) {
-	name = strings.ToLower(name)
-	if handlers, ok := e.handlers.Load(name); ok {
+func (e *EventEmitter) emit(name string, params ...interface{}) {
+	e.handlersMu.Lock()
+	if e.handlers == nil {
+		e.handlers = make(map[string][]*EventHandlerInstance)
+	}
+	handlers, ok := e.handlers[name]
+	e.handlersMu.Unlock()
+
+	if ok {
 		for _, eh := range handlers {
-			eh.eventHandler.Call(params...)
+			if eh.once != nil {
+				eh.once.Do(func() {
+					eh.eventHandler.Call(params...)
+					e.off(name, eh)
+				})
+			} else {
+				eh.eventHandler.Call(params...)
+			}
 		}
 	}
 
-	if handlersOnce, ok := e.handlersOnce.Load(name); ok {
-		for _, eh := range handlersOnce {
-			eh.eventHandler.Call(params...)
-			e.handlersOnce.Delete(name)
-		}
-	}
 }
 
-func (e *EventEmitter) Handle(name string, params ...interface{}) {
-	if e.done == nil {
-		e.done = make(chan struct{})
-		e.eventQueue = make(chan event) // TODO: maybe make it buffered, so sender won't block
-		go e.Listen(e.eventQueue)
-	}
-	e.eventQueue <- event{name, params}
+func (e *EventEmitter) Emit(name string, params ...interface{}) {
+	e.emit(strings.ToLower(name), params...)
 }
 
-func (e *EventEmitter) AddHandler(name string, handler interface{}) func() {
+func (e *EventEmitter) On(name string, handler interface{}) func() {
 	// Figure out how to panic if event name != handler
 
 	eh := interfaceToEventHandler(handler)
@@ -134,10 +89,10 @@ func (e *EventEmitter) AddHandler(name string, handler interface{}) func() {
 		panic("trying to add a non existing handler")
 	}
 
-	return e.addHandler(strings.ToLower(name), eh)
+	return e.on(strings.ToLower(name), false, eh)
 }
 
-func (e *EventEmitter) AddHandlerOnce(name string, handler interface{}) func() {
+func (e *EventEmitter) Once(name string, handler interface{}) func() {
 	// Figure out how to panic if event name != handler
 
 	eh := interfaceToEventHandler(handler)
@@ -147,24 +102,11 @@ func (e *EventEmitter) AddHandlerOnce(name string, handler interface{}) func() {
 		panic("trying to add a non existing handler")
 	}
 
-	return e.addHandlerOnce(strings.ToLower(name), eh)
+	return e.on(strings.ToLower(name), true, eh)
 }
 
-func (e *EventEmitter) Listen(eventQueue chan event) {
-	for {
-		select {
-		case ev := <-eventQueue:
-			e.handle(ev.Name, ev.Args...)
-		case <-e.done:
-			return
-		}
-	}
-}
-
-// Close method stops a Listen goroutine
-func (e *EventEmitter) Close() {
-	if e.done != nil {
-		close(e.done)
-		e.done = nil
-	}
+func (e *EventEmitter) RemoveAllListeners(name string) {
+	e.handlersMu.Lock()
+	e.handlers[name] = nil
+	e.handlersMu.Unlock()
 }
