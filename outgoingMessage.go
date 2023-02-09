@@ -18,12 +18,13 @@ func newOutgoingBanchoMessage(client *Client, sender MessageSender, message stri
 	}
 }
 
-func (o *OutgoingMessage) Send() <-chan error {
+func (o *OutgoingMessage) Send() error {
 	o.C = make(chan error, 1)
 	if o.client.IsConnected() {
 		o.client.messageQueue <- o
 	} else {
-		o.C <- ErrConnectionClosed
+		return ErrConnectionClosed
 	}
-	return o.C
+
+	return <-o.C
 }
