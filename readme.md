@@ -8,7 +8,15 @@ Inspired by [banchojs](https://github.com/ThePooN/bancho.js)
 - [ ] Multiplayer support
 - [ ] Better Reconnect mechanism
 - [ ] Tests
+- [ ] Examples
+- [ ] Documentation
+- [ ] readme
+## Bot Account
+// TODO:
 
+**Please DON'T create a separate account for your bot. This will be considered multi-accounting and may restrict both of your accounts**
+
+Like banchojs, this package uses rate limits for normal user accounts by default
 ## Getting Started
 Install module with `go get github.com/robloxxa/banchogo`
 
@@ -75,4 +83,15 @@ client.OnMessage(func(m *PrivateMessage) {
 	}()
 }) 
 ```
-Basically if you see that method returns a go channel, you should consider calling it in separate from emitted event goroutine
+Basically, if you see that method returns a chan, you should consider calling it in separate from emitted event goroutine
+
+## Compatability
+This package uses go generics with was introduced in go 1.19. 
+
+All versions below 1.19 are incompatible.
+
+## Special thanks
+
+[ThePooN](https://github.com/ThePooN/) and [his community](https://discord.gg/ThePooN) - For creating [banchojs](https://github.com/ThePooN/bancho.js), which inspired me to make this package and for saving my time understanding how bancho works
+
+[TheHowl](https://github.com/thehowl) - For go osu api wrapper [go-osuapi](https://github.com/thehowl/go-osuapi)
