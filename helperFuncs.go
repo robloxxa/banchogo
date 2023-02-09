@@ -1,6 +1,8 @@
 package banchogo
 
-import "unicode/utf8"
+import (
+	"unicode/utf8"
+)
 
 func TruncateString(str string, length int) string {
 	if length <= 0 {
@@ -12,4 +14,9 @@ func TruncateString(str string, length int) string {
 	}
 
 	return string([]rune(str)[:length])
+}
+
+func RandomString() string {
+	// TODO:
+	return ""
 }
