@@ -1,5 +1,16 @@
 package banchogo
 
+import "regexp"
+
+var actionRegex = regexp.MustCompile("^\x01ACTION( (.+)?)?\x01")
+
+type MessageSender interface {
+	Name() string
+	SendMessage(string) error
+	SendAction(string) error
+	Type() string
+}
+
 type Message interface {
 	Sender() MessageSender
 	Content() string
@@ -19,6 +30,9 @@ func (b *message) Content() string {
 }
 
 func (b *message) Action() string {
-	// TODO:
+	action := actionRegex.FindStringSubmatch(b.Content())
+	if action != nil {
+		return action[2]
+	}
 	return ""
 }
