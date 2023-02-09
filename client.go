@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/puzpuzpuz/xsync/v2"
+	"github.com/thehowl/go-osuapi"
 	"go.uber.org/ratelimit"
+	"io"
 	"net"
 	"net/textproto"
 	"strings"
@@ -34,14 +36,11 @@ var (
 	ErrMessageTimeout   = errors.New("message timeout")
 	ErrConnectionClosed = errors.New("connection closed")
 
-	ErrUserOffline = errors.New("user offline")
-)
+	ErrUserOffline  = errors.New("user offline")
+	ErrUserNotFound = errors.New("user not found")
 
-type MessageSender interface {
-	Name() string
-	SendMessage(string) <-chan error
-	SendAction(string) <-chan error
-}
+	ErrChannelNotFound = errors.New("no such channel")
+)
 
 type ClientOptions struct {
 	Username string
@@ -52,15 +51,16 @@ type ClientOptions struct {
 	BotAccount bool
 	Reconnect  *bool
 
-	RateLimiter ratelimit.Limiter
+	ApiKey string
 
-	// TODO: Check if we even need logger
-	//Log *log.Logger
+	RateLimiter ratelimit.Limiter
 }
 
 type Client struct {
 	// TODO: Make documentation
-	ev *EventEmitter
+	ev EventEmitter
+
+	Api osuapi.Client
 
 	Username string
 	Password string
@@ -71,6 +71,7 @@ type Client struct {
 	// Used for initialising default values for RateLimiter and prevent sending messages to a public channel like #osu.
 	// False by default
 	BotAccount bool
+
 	// Reconnect set to "false" if you don't want to reconnect after error
 	Reconnect bool
 
@@ -90,31 +91,41 @@ type Client struct {
 	stateMutex   sync.RWMutex
 	connectState ConnectState
 
-	wg              sync.WaitGroup
+	currentWhois *WhoisResponse
+
 	messageQueue    chan *OutgoingMessage
 	reconnectSignal chan struct{}
 	connectSignal   chan error
 
-	done chan struct{}
+	Done chan struct{}
 }
 
 func NewBanchoClient(opt ClientOptions) (b *Client) {
 	b = &Client{
-		ev:         NewEmitter(),
 		Username:   opt.Username,
 		Password:   opt.Password,
 		BotAccount: opt.BotAccount,
 	}
 
 	if opt.RateLimiter == nil {
-		amount := 9
-		duration := 12500 * time.Millisecond
+		var (
+			amount   int
+			duration time.Duration
+		)
+
 		if b.BotAccount {
 			amount = 298
 			duration = 62500 * time.Millisecond
+		} else {
+			amount = 9
+			duration = 12500 * time.Millisecond
 		}
 		b.RateLimiter = ratelimit.New(amount, ratelimit.Per(duration))
 		b.RateLimiter.Take() // Init Ratelimiter
+	}
+
+	if opt.ApiKey != "" {
+		b.Api = *osuapi.NewClient(opt.ApiKey)
 	}
 
 	return
@@ -144,18 +155,20 @@ func (b *Client) Connect() (err error) {
 	if b.Channels == nil {
 		b.Channels = xsync.NewMapOf[*Channel]()
 	}
+	if b.reconnectSignal == nil {
+		b.reconnectSignal = make(chan struct{})
+	}
 
 	b.conn, err = net.Dial("tcp", b.Host+":"+b.Port)
 	if err != nil {
 		return err
 	}
 
-	b.done = make(chan struct{})
+	b.Done = make(chan struct{})
 	b.connectSignal = make(chan error)
 	b.messageQueue = make(chan *OutgoingMessage)
 
-	b.wg.Add(2)
-	go b.readIrcMessages(b.conn, b.done)
+	go b.readIrcMessages(b.conn, b.Done)
 	go b.processMessages(b.messageQueue)
 
 	defer func() {
@@ -171,48 +184,47 @@ func (b *Client) Connect() (err error) {
 	b.Send("USER " + b.Username + " 0 * :" + b.Username)
 	b.Send("NICK " + b.Username)
 
-	timeout := time.NewTimer(b.Timeout)
 	select {
 	case err = <-b.connectSignal:
-	case <-b.done:
+	case <-b.Done:
 		err = errors.New("client disconnected")
-	case <-timeout.C:
+	case <-time.After(b.Timeout):
 		err = errors.New("server timed out")
 	}
 	return
 }
 
 func (b *Client) stop() {
-	if b.done != nil {
-		close(b.done)
-		b.done = nil
+	select {
+	case <-b.Done:
+	default:
+		close(b.Done)
 	}
 
-	b.wg.Wait()
-
-	if b.reconnectSignal != nil {
+	select {
+	case <-b.reconnectSignal:
+	default:
 		close(b.reconnectSignal)
-		b.reconnectSignal = nil
 	}
 
 	if b.conn != nil {
 		b.conn.Close()
-		b.conn = nil
 	}
-
-	b.Channels.Range(func(k string, u *Channel) bool {
-		u.Joined = false
-		return true
-	})
 }
 
 func (b *Client) reconnect() {
+	// TODO: redesign reconnect mechanism
 	if b.IsReconnecting() {
 		return
 	}
 
-	b.stop()
+	select {
+	case <-b.Done:
+		return
+	default:
+	}
 
+	b.Disconnect()
 	for {
 		err := b.Connect()
 
@@ -220,16 +232,13 @@ func (b *Client) reconnect() {
 			return
 		}
 
-		b.ev.Handle("error", err)
+		b.ev.Emit("error", err)
 
-		b.reconnectSignal = make(chan struct{})
 		timer := time.NewTimer(5 * time.Second)
-
 		b.setConnectState(Reconnecting)
 
 		select {
 		case <-timer.C:
-			b.reconnectSignal = nil
 		case <-b.reconnectSignal:
 			return
 		}
@@ -247,10 +256,13 @@ func (b *Client) Disconnect() {
 		b.stop()
 		b.setConnectState(Disconnected)
 	}()
-	// If we're currently reconnecting and waiting for a timeout,
-	// we send a signal to shut down that goroutine for reconnecting
 
-	// TODO: Send PART to all channels for clean disconnect
+	b.Channels.Range(func(_ string, c *Channel) bool {
+		if c.Joined {
+			emitPart(b, b.GetSelf(), c)
+		}
+		return true
+	})
 
 	b.Send("QUIT")
 }
@@ -259,40 +271,30 @@ func (b *Client) Disconnect() {
 func (b *Client) Close() {
 	b.Disconnect()
 
-	b.ev.Close()
-
-	b.Channels.Range(func(_ string, ch *Channel) bool {
-		//ch.ev.Close()
-		return true
-	})
-	b.Users.Range(func(_ string, u *User) bool {
-		u.ev.Close()
-		return false
-	})
 }
 
-func (b *Client) Send(message string) error {
+func (b *Client) Send(format string, a ...any) error {
 	if b.IsDisconnected() || b.IsReconnecting() {
 		return ErrConnectionClosed
 	}
-	_, err := fmt.Fprintf(b.conn, "%s\r\n", message)
+	m := fmt.Sprintf(format, a...)
+	_, err := fmt.Fprintf(b.conn, "%s\r\n", m)
 	if err != nil {
 		return err
 	}
-	b.ev.Handle("OnRawMessage", strings.Split(message, " "))
+	b.ev.Emit("OnRawMessage", strings.Split(m, " "))
 	return nil
 }
 
 func (b *Client) readIrcMessages(conn net.Conn, done <-chan struct{}) {
-	defer b.wg.Done()
 	tp := textproto.NewReader(bufio.NewReader(conn))
 	for {
 		content, err := tp.ReadLine()
 		if err != nil {
-			if err.Error() == "EOF" {
-				b.ev.Handle("Error", ErrConnectionClosed)
+			if err == io.EOF {
+				b.ev.Emit("Error", ErrConnectionClosed)
 			} else {
-				b.ev.Handle("Error", err)
+				b.ev.Emit("Error", err)
 			}
 
 			if b.conn == conn {
@@ -306,14 +308,19 @@ func (b *Client) readIrcMessages(conn net.Conn, done <-chan struct{}) {
 			return
 		default:
 			splits := strings.Split(content, " ")
-
-			b.ev.Handle("RawMessage", splits)
+			b.ev.Emit("RawMessage", splits)
 			if splits[0] == "PING" {
-				b.ev.Handle("PING")
+				b.ev.Emit("PING")
 				b.Send("PONG " + strings.Join(append(splits[:0], splits[1:]...), " "))
 			}
 
-			ircHandler, ok := ircHandlers[splits[1]]
+			// When connection was closed unexpectedly from our side there can be an unfinished message
+			// TODO: find a way to fix that issue
+			if len(splits) < 1 {
+				break
+			}
+
+			ircHandler, ok := IrcHandlers[splits[1]]
 			if ok {
 				ircHandler(b, splits)
 			}
@@ -329,7 +336,6 @@ func (b *Client) processMessages(messageQueue <-chan *OutgoingMessage) {
 			msg.C <- ErrConnectionClosed
 		}
 		b.messageQueue = nil
-		b.wg.Done()
 	}()
 	for {
 		select {
@@ -346,6 +352,9 @@ func (b *Client) processMessages(messageQueue <-chan *OutgoingMessage) {
 			name := TruncateString(strings.Split(msg.Name(), "\n")[0], 28)
 			content := strings.Split(msg.Content, "\n")[0]
 
+			if b.BotAccount && msg.Type() == "channel" {
+				msg.C <- errors.New("bot accounts aren't allowed to send messages in channels")
+			}
 			err := b.Send(fmt.Sprintf("PRIVMSG %s :%s", name, content))
 			if err != nil {
 				msg.C <- err
@@ -354,13 +363,13 @@ func (b *Client) processMessages(messageQueue <-chan *OutgoingMessage) {
 
 			switch s := msg.MessageSender.(type) {
 			case *User:
-				b.ev.Handle("PrivateMessage", newPrivateMessage(b, b.GetSelf(), s, true, content))
+				b.ev.Emit("PrivateMessage", newPrivateMessage(b, b.GetSelf(), s, true, content))
 			case *Channel:
-				b.ev.Handle("ChannelMessage", newChannelMessage(b, b.GetSelf(), s, true, content))
+				b.ev.Emit("ChannelMessage", newChannelMessage(b, b.GetSelf(), s, true, content))
 			}
 
 			msg.C <- nil
-		case <-b.done:
+		case <-b.Done:
 			return
 		}
 	}
@@ -373,7 +382,7 @@ func (b *Client) GetChannel(channelName string) (channel *Channel, err error) {
 	}
 	channel, ok := b.Channels.Load(channelName)
 	if !ok {
-		channel = NewBanchoChannel(b, channelName)
+		channel = NewChannel(b, channelName)
 		b.Channels.Store(channelName, channel)
 	}
 	return
@@ -405,14 +414,14 @@ func (b *Client) setConnectState(state ConnectState) {
 	b.stateMutex.Unlock()
 
 	if state == Connected {
-		b.ev.Handle("Connect", state)
+		b.ev.Emit("Connect", state)
 	}
 
 	if state == Disconnected {
-		b.ev.Handle("Disconnect")
+		b.ev.Emit("Disconnect", nil)
 	}
 
-	b.ev.Handle("StateChanged", state)
+	b.ev.Emit("StateChanged", state)
 }
 
 func (b *Client) IsDisconnected() bool {
