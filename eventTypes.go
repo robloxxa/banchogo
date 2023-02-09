@@ -6,12 +6,18 @@ package banchogo
 
 type EmptyHandlerType func()
 
+type EllipseInterfaceHandlerType func(...interface{})
+
 type WithErrorHandlerType func(error)
 
 type RawMessageHandlerType func([]string)
+
+type ConnectStateHandlerType func(ConnectState)
 
 type MessageHandlerType func(Message)
 
 type PrivateMessageHandlerType func(*PrivateMessage)
 
 type ChannelMessageHandlerType func(*ChannelMessage)
+
+type ChannelMemberHandlerType func(*ChannelMember)

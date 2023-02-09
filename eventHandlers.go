@@ -6,11 +6,49 @@ SEE event_types.go INSTEAD
 
 package banchogo
 
+func (eh ChannelMemberHandlerType) Call(a ...interface{}) {
+	a0, _ := a[0].(*ChannelMember)
+
+	eh(a0)
+}
+
+func (eh ChannelMemberHandlerType) NumField() int {
+	return 1
+}
+
 func (eh ChannelMessageHandlerType) Call(a ...interface{}) {
-	eh(a[0].(*ChannelMessage))
+	a0, _ := a[0].(*ChannelMessage)
+
+	eh(a0)
 }
 
 func (eh ChannelMessageHandlerType) NumField() int {
+	return 1
+}
+
+func (eh ConnectStateHandlerType) Call(a ...interface{}) {
+	a0, _ := a[0].(ConnectState)
+
+	eh(a0)
+}
+
+func (eh ConnectStateHandlerType) NumField() int {
+	return 1
+}
+
+func (eh EllipseInterfaceHandlerType) Call(a ...interface{}) {
+	var ellipsis []interface{}
+	if len(a) >= eh.NumField() {
+		ellipsis = make([]interface{}, len(a)-eh.NumField()+1)
+		for i := eh.NumField() - 1; i < len(a); i++ {
+			ellipsis[i], _ = a[i].(interface{})
+		}
+	}
+
+	eh(ellipsis...)
+}
+
+func (eh EllipseInterfaceHandlerType) NumField() int {
 	return 1
 }
 
@@ -23,7 +61,9 @@ func (eh EmptyHandlerType) NumField() int {
 }
 
 func (eh MessageHandlerType) Call(a ...interface{}) {
-	eh(a[0].(Message))
+	a0, _ := a[0].(Message)
+
+	eh(a0)
 }
 
 func (eh MessageHandlerType) NumField() int {
@@ -31,7 +71,9 @@ func (eh MessageHandlerType) NumField() int {
 }
 
 func (eh PrivateMessageHandlerType) Call(a ...interface{}) {
-	eh(a[0].(*PrivateMessage))
+	a0, _ := a[0].(*PrivateMessage)
+
+	eh(a0)
 }
 
 func (eh PrivateMessageHandlerType) NumField() int {
@@ -39,7 +81,9 @@ func (eh PrivateMessageHandlerType) NumField() int {
 }
 
 func (eh RawMessageHandlerType) Call(a ...interface{}) {
-	eh(a[0].([]string))
+	a0, _ := a[0].([]string)
+
+	eh(a0)
 }
 
 func (eh RawMessageHandlerType) NumField() int {
@@ -47,7 +91,9 @@ func (eh RawMessageHandlerType) NumField() int {
 }
 
 func (eh WithErrorHandlerType) Call(a ...interface{}) {
-	eh(a[0].(error))
+	a0, _ := a[0].(error)
+
+	eh(a0)
 }
 
 func (eh WithErrorHandlerType) NumField() int {
@@ -56,8 +102,14 @@ func (eh WithErrorHandlerType) NumField() int {
 
 func interfaceToEventHandler(handler interface{}) EventHandler {
 	switch eh := handler.(type) {
+	case func(*ChannelMember):
+		return ChannelMemberHandlerType(eh)
 	case func(*ChannelMessage):
 		return ChannelMessageHandlerType(eh)
+	case func(ConnectState):
+		return ConnectStateHandlerType(eh)
+	case func(...interface{}):
+		return EllipseInterfaceHandlerType(eh)
 	case func():
 		return EmptyHandlerType(eh)
 	case func(Message):
