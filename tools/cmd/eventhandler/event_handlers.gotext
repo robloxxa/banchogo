@@ -12,9 +12,11 @@ func (eh {{$k}}) Call(a ...interface{}) { {{if hasEllipsis $v}}{{$type := getEll
 	if len(a) >= eh.NumField() {
 		ellipsis = make([]{{$type}}, len(a) - eh.NumField() + 1)
 		for i := eh.NumField() - 1 ; i < len(a) ; i++ {
-			ellipsis[i] = a[i].({{$type}})
+			ellipsis[i], _ = a[i].({{$type}})
 		}
-	}{{end}}
+	}{{end}}{{range $i, $t := $v}}
+	{{if not (isEllipsis $t)}}a{{$i}}, _ := a[{{$i}}].({{$t}}){{end}}
+	{{end}}
     eh({{formatTypeAssert $v}})
 }
 
